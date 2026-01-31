@@ -1,4 +1,5 @@
 using LenderMatch.API.Data;
+using LenderMatch.API.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -18,6 +19,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddScoped<MatchingService>();
 
 // Add CORS for React
 builder.Services.AddCors(options =>
