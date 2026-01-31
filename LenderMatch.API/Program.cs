@@ -31,7 +31,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
-    // DbSeeder.Seed(db);
+    DbSeeder.Seed(db);
 }
 
 // Configure the HTTP request pipeline.
