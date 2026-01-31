@@ -13,7 +13,6 @@ public class AppDbContext : DbContext
     public DbSet<LoanApplication> LoanApplications { get; set; }
 
     // --- New Tables for Application Components ---
-    // Registering these ensures they get their own tables (e.g., "Borrowers", "Guarantors")
     public DbSet<Borrower> Borrowers { get; set; }
     public DbSet<PersonalGuarantor> Guarantors { get; set; }
     public DbSet<BusinessCredit> CreditProfiles { get; set; }
@@ -23,20 +22,24 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // 1. Configure Lender -> Programs (One-to-Many)
-        modelBuilder.Entity<Lender>()
-            .HasMany(l => l.Programs)
-            .WithOne()
-            .HasForeignKey(p => p.LenderId)
-            .OnDelete(DeleteBehavior.Cascade);
+        // --- Explicit: configure LendingProgram as dependent so EF uses the existing LenderId ---
+        modelBuilder.Entity<LendingProgram>(eb =>
+        {
+            eb.HasKey(p => p.Id);
 
-        // 2. Configure LoanApplication Relationships (One-to-One)
-        // When an Application is deleted, its parts (Borrower, Guarantor, etc.) should also be deleted.
+            eb.HasOne(p => p.Lender)
+              .WithMany(l => l.Programs)
+              .HasForeignKey(p => p.LenderId)
+              .HasPrincipalKey(l => l.Id)
+              .OnDelete(DeleteBehavior.Cascade);
+        });
 
+        // Keep LoanApplication mappings as before (one-to-one using shadow FKs),
+        // or add explicit FK properties on LoanApplication if you prefer non-shadow keys.
         modelBuilder.Entity<LoanApplication>()
             .HasOne(a => a.Business)
             .WithOne()
-            .HasForeignKey<LoanApplication>("BorrowerId") // Shadow FK
+            .HasForeignKey<LoanApplication>("BorrowerId")
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<LoanApplication>()
@@ -57,9 +60,7 @@ public class AppDbContext : DbContext
             .HasForeignKey<LoanApplication>("LoanRequestId")
             .OnDelete(DeleteBehavior.Cascade);
 
-        // 3. PostgreSQL Specific: Handle List<string> as Arrays
-        // Npgsql automatically maps List<string> to text[] columns in Postgres.
-        // No special configuration is strictly required, but this ensures explicit definition.
+        // PostgreSQL: ensure List<string> -> text[] mapping
         modelBuilder.Entity<Lender>()
             .Property(e => e.RestrictedIndustries)
             .HasColumnType("text[]");
@@ -67,8 +68,5 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Lender>()
             .Property(e => e.RestrictedStates)
             .HasColumnType("text[]");
-
-        // Note: MatchResult is not added as a DbSet because your model 
-        // does not have a Primary Key (Id). It is treated as a DTO (Data Transfer Object).
     }
 }
