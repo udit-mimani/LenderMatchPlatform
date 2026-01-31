@@ -1,0 +1,25 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+[Bb]in/
+obj/
+**/bin/
+**/obj/
+
+# Rider / IDE
+.idea/
+.vscode/
+
+# User-specific files
+*.user
+*.csproj.user
+
+# npm / client
+client/node_modules/
+dist/
+build/
