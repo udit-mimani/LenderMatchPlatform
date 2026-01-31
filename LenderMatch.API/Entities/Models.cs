@@ -83,6 +83,12 @@ public class Lender
 public class LendingProgram
 {
     public int Id { get; set; }
+
+    public int LenderId { get; set; }
+    // Navigation Property (Optional, but good for accessing the parent Lender object)
+    // [JsonIgnore] // Prevent cycles if serializing
+    public Lender? Lender { get; set; }
+
     public string Name { get; set; } = string.Empty; // "Tier 1", "Startup Program"
 
     // --- Criteria (Nullable means "No Rule") ---
