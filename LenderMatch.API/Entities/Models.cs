@@ -110,7 +110,19 @@ public class MatchResult
 {
     public string LenderName { get; set; } = string.Empty;
     public bool IsEligible { get; set; }
+
+    // Programs
     public List<string> QualifiedPrograms { get; set; } = new();
+    public string BestMatchingProgram { get; set; } = string.Empty;
+
+    // Reasoning
     public List<string> RejectionReasons { get; set; } = new();
-    public int FitScore { get; set; }                // 0-100 as requested [cite: 336]
+    public List<string> ProgramMatchReasons { get; set; } = new();
+    public string FailurePoint { get; set; } = string.Empty; // Where in the evaluation it failed
+
+    // Scoring
+    public int FitScore { get; set; } // 0-100
+
+    // Metadata
+    public DateTime EvaluatedAt { get; set; }
 }
