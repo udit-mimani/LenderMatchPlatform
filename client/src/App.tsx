@@ -77,15 +77,31 @@ type Lender = {
   programs: LendingProgram[];
 };
 
+type Statistics = {
+  totalApplications: number;
+  totalLenders: number;
+  totalPrograms: number;
+  generatedAt: string;
+};
+
+type ValidationResult = {
+  isValid: boolean;
+  errors: string[];
+  derivedFeatures: DerivedFeatures;
+  validatedAt: string;
+};
+
 // ============================================================
 // MAIN APP COMPONENT
 // ============================================================
 
 export default function App() {
-  const [activeView, setActiveView] = useState<'application' | 'results' | 'policies'>('application');
+  const [activeView, setActiveView] = useState<'dashboard' | 'application' | 'results' | 'history' | 'policies'>('dashboard');
   const [workflowResult, setWorkflowResult] = useState<MatchingWorkflowResult | null>(null);
   const [lenders, setLenders] = useState<Lender[]>([]);
+  const [statistics, setStatistics] = useState<Statistics | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [savedFormData, setSavedFormData] = useState<any>(null);
 
   // Application form state
   const [formData, setFormData] = useState({
@@ -117,10 +133,20 @@ export default function App() {
     }
   });
 
-  // Load lenders on mount
+  // Load lenders and statistics on mount
   useEffect(() => {
     fetchLenders();
+    fetchStatistics();
   }, []);
+
+  const fetchStatistics = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/match/statistics`);
+      setStatistics(res.data);
+    } catch (err) {
+      console.error('Error fetching statistics:', err);
+    }
+  };
 
   const fetchLenders = async () => {
     try {
@@ -148,7 +174,10 @@ export default function App() {
     try {
       const res = await axios.post(`${API_BASE_URL}/api/match`, formData);
       setWorkflowResult(res.data);
+      setSavedFormData({...formData});
       setActiveView('results');
+      // Refresh statistics after new submission
+      fetchStatistics();
     } catch (err: any) {
       if (err.response?.data?.validationErrors) {
         alert('Validation Errors:\n' + err.response.data.validationErrors.join('\n'));
@@ -161,11 +190,67 @@ export default function App() {
     }
   };
 
+  const handleValidate = async () => {
+    setIsLoading(true);
+    try {
+      const res = await axios.post(`${API_BASE_URL}/api/match/validate`, formData);
+      const validation: ValidationResult = res.data;
+      if (validation.isValid) {
+        alert(`✓ Application is valid!\n\nDerived Features:\n• Credit Tier: ${validation.derivedFeatures.creditTier}\n• Business Type: ${validation.derivedFeatures.businessType}\n• Loan Category: ${validation.derivedFeatures.loanSizeCategory}`);
+      } else {
+        alert('Validation Errors:\n' + validation.errors.join('\n'));
+      }
+    } catch (err: any) {
+      alert('Error validating: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleReEvaluate = async (applicationId: number) => {
+    setIsLoading(true);
+    try {
+      const res = await axios.post(`${API_BASE_URL}/api/match/${applicationId}/re-evaluate`);
+      setWorkflowResult(res.data);
+      setActiveView('results');
+    } catch (err: any) {
+      alert('Error re-evaluating: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLookupApplication = async (applicationId: number) => {
+    setIsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/match/${applicationId}`);
+      const app = res.data;
+      // Convert to form data format and re-evaluate
+      const appFormData = {
+        business: app.business,
+        guarantor: app.guarantor,
+        creditProfile: app.creditProfile,
+        request: app.request
+      };
+      setSavedFormData(appFormData);
+      // Re-evaluate to get matching results
+      await handleReEvaluate(applicationId);
+    } catch (err: any) {
+      if (err.response?.status === 404) {
+        alert(`Application #${applicationId} not found`);
+      } else {
+        alert('Error fetching application: ' + (err.message || 'Unknown error'));
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
       <header className="bg-slate-900/80 backdrop-blur-sm border-b border-slate-700/50 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+        <div className="max-w-5xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
@@ -174,10 +259,20 @@ export default function App() {
               <p className="text-slate-400 text-sm mt-1">Intelligent Equipment Finance Matching</p>
             </div>
             
-            <nav className="flex gap-2">
+            <nav className="flex gap-1 flex-wrap">
+              <button
+                onClick={() => { setActiveView('dashboard'); fetchStatistics(); }}
+                className={`px-3 py-2 rounded-lg font-medium text-sm ${
+                  activeView === 'dashboard'
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                Dashboard
+              </button>
               <button
                 onClick={() => setActiveView('application')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                className={`px-3 py-2 rounded-lg font-medium text-sm ${
                   activeView === 'application'
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
                     : 'text-slate-300 hover:bg-slate-800'
@@ -188,7 +283,7 @@ export default function App() {
               <button
                 onClick={() => setActiveView('results')}
                 disabled={!workflowResult}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                className={`px-3 py-2 rounded-lg font-medium text-sm ${
                   activeView === 'results'
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
                     : workflowResult
@@ -198,14 +293,24 @@ export default function App() {
               >
                 Results
                 {workflowResult && (
-                  <span className="ml-2 px-2 py-0.5 bg-green-500 text-white text-xs rounded-full">
+                  <span className="ml-1 px-1.5 py-0.5 bg-green-500 text-white text-xs rounded-full">
                     {workflowResult.eligibleCount}
                   </span>
                 )}
               </button>
               <button
+                onClick={() => setActiveView('history')}
+                className={`px-3 py-2 rounded-lg font-medium text-sm ${
+                  activeView === 'history'
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                Lookup
+              </button>
+              <button
                 onClick={() => { setActiveView('policies'); fetchLenders(); }}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                className={`px-3 py-2 rounded-lg font-medium text-sm ${
                   activeView === 'policies'
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
                     : 'text-slate-300 hover:bg-slate-800'
@@ -219,18 +324,39 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-5xl mx-auto px-6 py-8">
+        {activeView === 'dashboard' && (
+          <DashboardView 
+            statistics={statistics} 
+            onRefresh={fetchStatistics}
+            onNewApplication={() => setActiveView('application')}
+          />
+        )}
+        
         {activeView === 'application' && (
           <ApplicationForm
             formData={formData}
             updateField={updateField}
             handleSubmit={handleSubmit}
+            handleValidate={handleValidate}
             isLoading={isLoading}
           />
         )}
         
         {activeView === 'results' && workflowResult && (
-          <ResultsView workflowResult={workflowResult} formData={formData} />
+          <ResultsView 
+            workflowResult={workflowResult} 
+            formData={savedFormData || formData}
+            onReEvaluate={() => handleReEvaluate(workflowResult.applicationId)}
+            isLoading={isLoading}
+          />
+        )}
+        
+        {activeView === 'history' && (
+          <ApplicationLookupView 
+            onLookup={handleLookupApplication}
+            isLoading={isLoading}
+          />
         )}
         
         {activeView === 'policies' && (
@@ -242,10 +368,153 @@ export default function App() {
 }
 
 // ============================================================
+// DASHBOARD VIEW COMPONENT
+// ============================================================
+
+function DashboardView({ statistics, onRefresh, onNewApplication }: { 
+  statistics: Statistics | null; 
+  onRefresh: () => void;
+  onNewApplication: () => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-white">Dashboard</h2>
+        <button
+          onClick={onRefresh}
+          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {/* Statistics Cards */}
+      <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+        <h3 className="text-lg font-semibold text-white mb-4">System Statistics</h3>
+        {statistics ? (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700">
+                <th className="text-left py-3 text-slate-400 font-medium">Metric</th>
+                <th className="text-left py-3 text-slate-400 font-medium">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-slate-700/50">
+                <td className="py-3 text-slate-400">Total Applications Submitted</td>
+                <td className="py-3 text-white font-bold text-lg">{statistics.totalApplications}</td>
+              </tr>
+              <tr className="border-b border-slate-700/50">
+                <td className="py-3 text-slate-400">Total Lenders</td>
+                <td className="py-3 text-white font-bold text-lg">{statistics.totalLenders}</td>
+              </tr>
+              <tr className="border-b border-slate-700/50">
+                <td className="py-3 text-slate-400">Total Programs</td>
+                <td className="py-3 text-white font-bold text-lg">{statistics.totalPrograms}</td>
+              </tr>
+              <tr>
+                <td className="py-3 text-slate-400">Last Updated</td>
+                <td className="py-3 text-slate-300 text-sm">{new Date(statistics.generatedAt).toLocaleString()}</td>
+              </tr>
+            </tbody>
+          </table>
+        ) : (
+          <p className="text-slate-400">Loading statistics...</p>
+        )}
+      </div>
+
+      {/* Quick Actions */}
+      <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+        <h3 className="text-lg font-semibold text-white mb-4">Quick Actions</h3>
+        <div className="flex gap-4">
+          <button
+            onClick={onNewApplication}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+          >
+            Submit New Application
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// APPLICATION LOOKUP VIEW COMPONENT
+// ============================================================
+
+function ApplicationLookupView({ onLookup, isLoading }: { 
+  onLookup: (id: number) => void;
+  isLoading: boolean;
+}) {
+  const [applicationId, setApplicationId] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = parseInt(applicationId);
+    if (id > 0) {
+      onLookup(id);
+    } else {
+      alert('Please enter a valid application ID');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-white">Lookup Application</h2>
+      
+      <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+        <p className="text-slate-400 mb-4">
+          Enter an application ID to retrieve its details and re-evaluate against current lender criteria.
+        </p>
+        
+        <form onSubmit={handleSubmit} className="flex gap-4">
+          <input
+            type="number"
+            min="1"
+            placeholder="Application ID (e.g., 1, 2, 3...)"
+            value={applicationId}
+            onChange={(e) => setApplicationId(e.target.value)}
+            className="flex-1 bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="submit"
+            disabled={isLoading || !applicationId}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-medium"
+          >
+            {isLoading ? 'Loading...' : 'Lookup & Re-evaluate'}
+          </button>
+        </form>
+      </div>
+
+      <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+        <h3 className="text-lg font-semibold text-white mb-3">How it works</h3>
+        <table className="w-full text-sm">
+          <tbody>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400 w-8">1.</td>
+              <td className="py-3 text-slate-300">Enter the application ID from a previous submission</td>
+            </tr>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">2.</td>
+              <td className="py-3 text-slate-300">The system retrieves the original application details</td>
+            </tr>
+            <tr>
+              <td className="py-3 text-slate-400">3.</td>
+              <td className="py-3 text-slate-300">Re-evaluates against current lender policies (which may have changed)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // APPLICATION FORM COMPONENT
 // ============================================================
 
-function ApplicationForm({ formData, updateField, handleSubmit, isLoading }: any) {
+function ApplicationForm({ formData, updateField, handleSubmit, handleValidate, isLoading }: any) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -518,8 +787,16 @@ function ApplicationForm({ formData, updateField, handleSubmit, isLoading }: any
         </div>
       </div>
 
-      {/* Submit Button */}
-      <div className="flex justify-center pt-4">
+      {/* Submit Buttons */}
+      <div className="flex justify-center gap-4 pt-4">
+        <button
+          type="button"
+          onClick={handleValidate}
+          disabled={isLoading}
+          className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Validate First
+        </button>
         <button
           type="submit"
           disabled={isLoading}
@@ -549,7 +826,12 @@ function ApplicationForm({ formData, updateField, handleSubmit, isLoading }: any
 // RESULTS VIEW COMPONENT
 // ============================================================
 
-function ResultsView({ workflowResult, formData }: { workflowResult: MatchingWorkflowResult; formData: any }) {
+function ResultsView({ workflowResult, formData, onReEvaluate, isLoading }: { 
+  workflowResult: MatchingWorkflowResult; 
+  formData: any;
+  onReEvaluate?: () => void;
+  isLoading?: boolean;
+}) {
   const [selectedLender, setSelectedLender] = useState<MatchResult | null>(null);
 
   const eligibleMatches = workflowResult.matches.filter(m => m.isEligible);
@@ -557,76 +839,121 @@ function ResultsView({ workflowResult, formData }: { workflowResult: MatchingWor
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-6 text-white">
-          <div className="text-3xl font-bold">{workflowResult.eligibleCount}</div>
-          <div className="text-blue-100 text-sm mt-1">Eligible Lenders</div>
+      {/* Summary Table */}
+      <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-white">Match Summary</h2>
+          {onReEvaluate && (
+            <button
+              onClick={onReEvaluate}
+              disabled={isLoading}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded-lg text-sm"
+            >
+              {isLoading ? 'Re-evaluating...' : 'Re-evaluate'}
+            </button>
+          )}
         </div>
-        
-        <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-6 text-white">
-          <div className="text-3xl font-bold">{workflowResult.totalEvaluated - workflowResult.eligibleCount}</div>
-          <div className="text-red-100 text-sm mt-1">Ineligible Lenders</div>
-        </div>
-        
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white">
-          <div className="text-3xl font-bold">{workflowResult.derivedFeatures.creditTier}</div>
-          <div className="text-green-100 text-sm mt-1">Credit Tier</div>
-        </div>
-        
-        <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-6 text-white">
-          <div className="text-3xl font-bold">{eligibleMatches.length > 0 ? Math.max(...eligibleMatches.map(m => m.fitScore)) : 0}</div>
-          <div className="text-purple-100 text-sm mt-1">Best Fit Score</div>
-        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-700">
+              <th className="text-left py-3 text-slate-400 font-medium">Metric</th>
+              <th className="text-left py-3 text-slate-400 font-medium">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">Application ID</td>
+              <td className="py-3 text-white font-bold">#{workflowResult.applicationId}</td>
+            </tr>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">Evaluated At</td>
+              <td className="py-3 text-slate-300 text-sm">{new Date(workflowResult.evaluatedAt).toLocaleString()}</td>
+            </tr>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">Eligible Lenders</td>
+              <td className="py-3 text-green-400 font-bold text-lg">{workflowResult.eligibleCount}</td>
+            </tr>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">Ineligible Lenders</td>
+              <td className="py-3 text-red-400 font-bold text-lg">{workflowResult.totalEvaluated - workflowResult.eligibleCount}</td>
+            </tr>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">Credit Tier</td>
+              <td className="py-3 text-white font-bold text-lg">{workflowResult.derivedFeatures.creditTier}</td>
+            </tr>
+            <tr>
+              <td className="py-3 text-slate-400">Best Fit Score</td>
+              <td className="py-3 text-purple-400 font-bold text-lg">{eligibleMatches.length > 0 ? Math.max(...eligibleMatches.map(m => m.fitScore)) : 0}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* Application Details */}
       <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
         <h2 className="text-xl font-bold text-white mb-4">Application Summary</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <div className="text-slate-400">Business</div>
-            <div className="text-white font-medium">{formData.business.businessName}</div>
-          </div>
-          <div>
-            <div className="text-slate-400">Industry</div>
-            <div className="text-white font-medium">{formData.business.industry}</div>
-          </div>
-          <div>
-            <div className="text-slate-400">Loan Amount</div>
-            <div className="text-white font-medium">${formData.request.amount.toLocaleString()}</div>
-          </div>
-          <div>
-            <div className="text-slate-400">Equipment</div>
-            <div className="text-white font-medium">{formData.request.equipmentType} ({formData.request.equipmentYear})</div>
-          </div>
-        </div>
+        <table className="w-full text-sm">
+          <tbody>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400 w-1/3">Business</td>
+              <td className="py-3 text-white font-medium">{formData.business.businessName}</td>
+            </tr>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">Industry</td>
+              <td className="py-3 text-white font-medium">{formData.business.industry}</td>
+            </tr>
+            <tr className="border-b border-slate-700/50">
+              <td className="py-3 text-slate-400">Loan Amount</td>
+              <td className="py-3 text-white font-medium">${formData.request.amount.toLocaleString()}</td>
+            </tr>
+            <tr>
+              <td className="py-3 text-slate-400">Equipment</td>
+              <td className="py-3 text-white font-medium">{formData.request.equipmentType} ({formData.request.equipmentYear})</td>
+            </tr>
+          </tbody>
+        </table>
         
         {/* Derived Features */}
-        <div className="mt-4 pt-4 border-t border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-300 mb-3">Derived Features</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <FeatureBadge label="Business Type" value={workflowResult.derivedFeatures.businessType} />
-            <FeatureBadge label="Loan Category" value={workflowResult.derivedFeatures.loanSizeCategory} />
-            <FeatureBadge label="Equipment Age" value={`${workflowResult.derivedFeatures.equipmentAgeYears || 0} years`} />
-            <FeatureBadge label="Trade Lines" value={workflowResult.derivedFeatures.tradeLineCount.toString()} />
-            <FeatureBadge 
-              label="Status" 
-              value={workflowResult.derivedFeatures.isStartup ? 'Startup' : 'Established'} 
-              color={workflowResult.derivedFeatures.isStartup ? 'yellow' : 'green'}
-            />
-          </div>
+        <div className="mt-6 pt-4 border-t border-slate-700">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4">Derived Features</h3>
+          <table className="w-full text-sm">
+            <tbody>
+              <tr className="border-b border-slate-700/50">
+                <td className="py-3 text-slate-400 w-1/3">Business Type</td>
+                <td className="py-3 text-white font-medium">{workflowResult.derivedFeatures.businessType}</td>
+              </tr>
+              <tr className="border-b border-slate-700/50">
+                <td className="py-3 text-slate-400">Loan Category</td>
+                <td className="py-3 text-white font-medium">{workflowResult.derivedFeatures.loanSizeCategory}</td>
+              </tr>
+              <tr className="border-b border-slate-700/50">
+                <td className="py-3 text-slate-400">Equipment Age</td>
+                <td className="py-3 text-white font-medium">{workflowResult.derivedFeatures.equipmentAgeYears || 0} years</td>
+              </tr>
+              <tr className="border-b border-slate-700/50">
+                <td className="py-3 text-slate-400">Trade Lines</td>
+                <td className="py-3 text-white font-medium">{workflowResult.derivedFeatures.tradeLineCount}</td>
+              </tr>
+              <tr>
+                <td className="py-3 text-slate-400">Status</td>
+                <td className="py-3">
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${workflowResult.derivedFeatures.isStartup ? 'bg-yellow-500/20 text-yellow-300' : 'bg-green-500/20 text-green-300'}`}>
+                    {workflowResult.derivedFeatures.isStartup ? 'Startup' : 'Established'}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
       {/* Eligible Lenders */}
       {eligibleMatches.length > 0 && (
         <div>
-          <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-            <span className="text-green-400">✓</span>
+          <h2 className="text-2xl font-bold text-white mb-4">
             Eligible Lenders ({eligibleMatches.length})
           </h2>
-          <div className="grid grid-cols-1 gap-4">
+          <div className="space-y-6">
             {eligibleMatches.map((match, idx) => (
               <LenderCard
                 key={idx}
@@ -643,11 +970,10 @@ function ResultsView({ workflowResult, formData }: { workflowResult: MatchingWor
       {/* Ineligible Lenders */}
       {ineligibleMatches.length > 0 && (
         <div>
-          <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-            <span className="text-red-400">✗</span>
+          <h2 className="text-2xl font-bold text-white mb-4">
             Ineligible Lenders ({ineligibleMatches.length})
           </h2>
-          <div className="grid grid-cols-1 gap-4">
+          <div className="space-y-6">
             {ineligibleMatches.map((match, idx) => (
               <LenderCard
                 key={idx}
@@ -664,51 +990,27 @@ function ResultsView({ workflowResult, formData }: { workflowResult: MatchingWor
   );
 }
 
-function FeatureBadge({ label, value, color = 'blue' }: { label: string; value: string; color?: string }) {
-  const colors: any = {
-    blue: 'bg-blue-500/20 text-blue-300',
-    green: 'bg-green-500/20 text-green-300',
-    yellow: 'bg-yellow-500/20 text-yellow-300',
-    purple: 'bg-purple-500/20 text-purple-300'
-  };
-
-  return (
-    <div className={`${colors[color]} rounded-lg px-3 py-2`}>
-      <div className="text-xs opacity-75">{label}</div>
-      <div className="font-semibold text-sm">{value}</div>
-    </div>
-  );
-}
-
 function LenderCard({ match, formData, isExpanded, onToggle }: any) {
   const isEligible = match.isEligible;
 
   return (
-    <div className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border-2 transition-all ${
-      isEligible ? 'border-green-500/50' : 'border-red-500/50'
+    <div className={`bg-slate-800/50 backdrop-blur-sm rounded-xl border ${
+      isEligible ? 'border-green-500/30' : 'border-red-500/30'
     }`}>
       {/* Header */}
       <div
-        className="p-6 cursor-pointer hover:bg-slate-700/30 transition-colors"
+        className="p-6 cursor-pointer hover:bg-slate-700/30"
         onClick={onToggle}
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-              isEligible ? 'bg-green-500/20' : 'bg-red-500/20'
-            }`}>
-              <span className="text-2xl">{isEligible ? '✓' : '✗'}</span>
-            </div>
-            
-            <div>
-              <h3 className="text-xl font-bold text-white">{match.lenderName}</h3>
-              {isEligible && match.bestMatchingProgram && (
-                <p className="text-sm text-slate-400">Best Program: {match.bestMatchingProgram}</p>
-              )}
-              {!isEligible && match.failurePoint && (
-                <p className="text-sm text-red-400">Failed at: {match.failurePoint}</p>
-              )}
-            </div>
+          <div>
+            <h3 className="text-xl font-bold text-white">{match.lenderName}</h3>
+            {isEligible && match.bestMatchingProgram && (
+              <p className="text-sm text-slate-400 mt-1">Best Program: {match.bestMatchingProgram}</p>
+            )}
+            {!isEligible && match.failurePoint && (
+              <p className="text-sm text-red-400 mt-1">Failed at: {match.failurePoint}</p>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -720,10 +1022,13 @@ function LenderCard({ match, formData, isExpanded, onToggle }: any) {
             )}
             
             <svg
-              className={`w-6 h-6 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+              width="20"
+              height="20"
+              className={`text-slate-400 flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
+              style={{ width: '20px', height: '20px', minWidth: '20px', minHeight: '20px', transition: 'transform 0.2s ease' }}
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
@@ -760,15 +1065,18 @@ function LenderCard({ match, formData, isExpanded, onToggle }: any) {
               {/* Match Reasons */}
               {match.programMatchReasons.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-semibold text-green-400 mb-2">✓ Why You Qualify</h4>
-                  <ul className="space-y-1">
-                    {match.programMatchReasons.map((reason: string, idx: number) => (
-                      <li key={idx} className="text-sm text-slate-300 flex items-start gap-2">
-                        <span className="text-green-400 mt-0.5">•</span>
-                        <span>{reason}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <h4 className="text-sm font-semibold text-green-400 mb-3">Why You Qualify</h4>
+                  <div className="bg-slate-900/30 rounded-lg border border-slate-700/50 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {match.programMatchReasons.map((reason: string, idx: number) => (
+                          <tr key={idx} className="border-b border-slate-700/30 last:border-0">
+                            <td className="px-4 py-3 text-slate-300">{reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
@@ -779,15 +1087,18 @@ function LenderCard({ match, formData, isExpanded, onToggle }: any) {
             <>
               {/* Rejection Reasons */}
               <div className="mt-4">
-                <h4 className="text-sm font-semibold text-red-400 mb-2">✗ Rejection Reasons</h4>
-                <ul className="space-y-2">
-                  {match.rejectionReasons.map((reason: string, idx: number) => (
-                    <li key={idx} className="text-sm text-slate-300 bg-red-500/10 rounded-lg p-3 flex items-start gap-2">
-                      <span className="text-red-400 mt-0.5">•</span>
-                      <span>{reason}</span>
-                    </li>
-                  ))}
-                </ul>
+                <h4 className="text-sm font-semibold text-red-400 mb-3">Rejection Reasons</h4>
+                <div className="bg-slate-900/30 rounded-lg border border-slate-700/50 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {match.rejectionReasons.map((reason: string, idx: number) => (
+                        <tr key={idx} className="border-b border-slate-700/30 last:border-0">
+                          <td className="px-4 py-3 text-slate-300">{reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* What Would Have Been Needed */}
@@ -809,65 +1120,46 @@ function DetailedCriteriaView({ formData }: any) {
   const criteria = [
     {
       name: 'FICO Score',
-      applicantValue: formData.guarantor.ficoScore,
-      status: 'met',
-      details: `Applicant: ${formData.guarantor.ficoScore}`
+      value: formData.guarantor.ficoScore,
     },
     {
       name: 'PayNet Score',
-      applicantValue: formData.creditProfile.payNetScore || 'Not Provided',
-      status: formData.creditProfile.payNetScore ? 'met' : 'optional',
-      details: formData.creditProfile.payNetScore ? `Applicant: ${formData.creditProfile.payNetScore}` : 'Not required for this program'
+      value: formData.creditProfile.payNetScore || 'Not Provided',
     },
     {
       name: 'Time in Business',
-      applicantValue: `${formData.business.yearsInBusiness} years`,
-      status: 'met',
-      details: `Applicant: ${formData.business.yearsInBusiness} years`
+      value: `${formData.business.yearsInBusiness} years`,
     },
     {
       name: 'Loan Amount',
-      applicantValue: `$${formData.request.amount.toLocaleString()}`,
-      status: 'met',
-      details: `Requested: $${formData.request.amount.toLocaleString()}`
+      value: `$${formData.request.amount.toLocaleString()}`,
     },
     {
       name: 'Trade Lines',
-      applicantValue: formData.creditProfile.tradeLineCount,
-      status: 'met',
-      details: `Applicant has ${formData.creditProfile.tradeLineCount} trade lines`
+      value: formData.creditProfile.tradeLineCount,
     }
   ];
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-slate-300 mb-3">📋 Criteria Breakdown</h4>
-      <div className="space-y-2">
-        {criteria.map((item, idx) => (
-          <div
-            key={idx}
-            className={`flex items-center justify-between p-3 rounded-lg ${
-              item.status === 'met'
-                ? 'bg-green-500/10 border border-green-500/30'
-                : 'bg-slate-700/30 border border-slate-600/30'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <span className={`text-lg ${item.status === 'met' ? 'text-green-400' : 'text-slate-500'}`}>
-                {item.status === 'met' ? '✓' : '○'}
-              </span>
-              <div>
-                <div className="text-sm font-medium text-white">{item.name}</div>
-                <div className="text-xs text-slate-400">{item.details}</div>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className={`text-sm font-semibold ${item.status === 'met' ? 'text-green-400' : 'text-slate-500'}`}>
-                {item.applicantValue}
-              </div>
-            </div>
-          </div>
-        ))}
+      <h4 className="text-sm font-semibold text-slate-300 mb-3">Criteria Breakdown</h4>
+      <div className="bg-slate-900/30 rounded-lg border border-slate-700/50 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-700">
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Criteria</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {criteria.map((item, idx) => (
+              <tr key={idx} className="border-b border-slate-700/50 last:border-0">
+                <td className="px-4 py-3 text-slate-400">{item.name}</td>
+                <td className="px-4 py-3 text-white font-medium">{item.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -911,9 +1203,8 @@ function getQualificationSuggestions(match: MatchResult, formData: any) {
   return (
     <ul className="space-y-1">
       {suggestions.map((suggestion, idx) => (
-        <li key={idx} className="flex items-start gap-2">
-          <span className="text-yellow-400 mt-0.5">•</span>
-          <span>{suggestion}</span>
+        <li key={idx} className="text-sm">
+          {suggestion}
         </li>
       ))}
     </ul>
@@ -972,35 +1263,49 @@ function PoliciesView({ lenders }: { lenders: Lender[] }) {
               </div>
 
               {/* Restrictions */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-6">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-300 mb-2">Restricted States</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedLender.restrictedStates.length > 0 ? (
-                      selectedLender.restrictedStates.map((state, idx) => (
-                        <span key={idx} className="px-3 py-1 bg-red-500/20 text-red-300 rounded-full text-xs font-medium">
-                          {state}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-slate-500 text-sm">No state restrictions</span>
-                    )}
-                  </div>
+                  <h3 className="text-sm font-semibold text-slate-300 mb-3">Restricted States</h3>
+                  {selectedLender.restrictedStates && selectedLender.restrictedStates.length > 0 ? (
+                    <div className="bg-slate-900/30 rounded-lg border border-slate-700/50 overflow-hidden">
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {(Array.isArray(selectedLender.restrictedStates) 
+                            ? selectedLender.restrictedStates 
+                            : String(selectedLender.restrictedStates).split(',').map(s => s.trim())
+                          ).map((state: string, idx: number) => (
+                            <tr key={idx} className="border-b border-slate-700/30 last:border-0">
+                              <td className="px-4 py-2 text-red-300">{state}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <span className="text-slate-500 text-sm">No state restrictions</span>
+                  )}
                 </div>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-300 mb-2">Restricted Industries</h3>
-                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                    {selectedLender.restrictedIndustries.length > 0 ? (
-                      selectedLender.restrictedIndustries.map((industry, idx) => (
-                        <span key={idx} className="px-3 py-1 bg-red-500/20 text-red-300 rounded-full text-xs font-medium">
-                          {industry}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-slate-500 text-sm">No industry restrictions</span>
-                    )}
-                  </div>
+                <div className="pt-4 border-t border-slate-600">
+                  <h3 className="text-sm font-semibold text-slate-300 mb-3">Restricted Industries</h3>
+                  {selectedLender.restrictedIndustries && selectedLender.restrictedIndustries.length > 0 ? (
+                    <div className="bg-slate-900/30 rounded-lg border border-slate-700/50 overflow-hidden max-h-64 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {(Array.isArray(selectedLender.restrictedIndustries) 
+                            ? selectedLender.restrictedIndustries 
+                            : String(selectedLender.restrictedIndustries).split(',').map(s => s.trim())
+                          ).map((industry: string, idx: number) => (
+                            <tr key={idx} className="border-b border-slate-700/30 last:border-0">
+                              <td className="px-4 py-2 text-red-300">{industry}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <span className="text-slate-500 text-sm">No industry restrictions</span>
+                  )}
                 </div>
               </div>
             </div>
